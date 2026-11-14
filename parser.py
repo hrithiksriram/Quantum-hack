@@ -7,14 +7,40 @@ from ir import create_ir, add_operation
 # SUPPORTED GATES
 # =========================================
 
-SUPPORTED_GATES = {
-    "id", "h", "x", "y", "z",
-    "s", "sdg", "t", "tdg",
-    "rx", "ry", "rz",
-    "u", "u1", "u2", "u3",
-    "cx", "cnot", "cy", "cz",
-    "ch", "swap", "ccx", "cswap",
+GATE_INFO = {
+    # Single-qubit gates: (qubits, parameters)
+    "id": (1, 0),
+    "h": (1, 0),
+    "x": (1, 0),
+    "y": (1, 0),
+    "z": (1, 0),
+    "s": (1, 0),
+    "sdg": (1, 0),
+    "t": (1, 0),
+    "tdg": (1, 0),
+
+    "rx": (1, 1),
+    "ry": (1, 1),
+    "rz": (1, 1),
+    "u1": (1, 1),
+    "u2": (1, 2),
+    "u3": (1, 3),
+    "u": (1, 3),
+
+    # Two-qubit gates
+    "cx": (2, 0),
+    "cnot": (2, 0),
+    "cy": (2, 0),
+    "cz": (2, 0),
+    "ch": (2, 0),
+    "swap": (2, 0),
+
+    # Three-qubit gates
+    "ccx": (3, 0),
+    "cswap": (3, 0),
 }
+
+SUPPORTED_GATES = set(GATE_INFO.keys())
 
 
 # =========================================
@@ -387,9 +413,6 @@ def parse_qasm(source):
 
         # ---------------------------------
         # GATES
-        # h q[0];
-        # cx q[0], q[1];
-        # rz(pi/2) q[0];
         # ---------------------------------
 
         match = re.fullmatch(
@@ -403,24 +426,48 @@ def parse_qasm(source):
 
             gate = gate.lower()
 
-            # Validate gate
+            # Validate supported gate
             if gate not in SUPPORTED_GATES:
                 raise ValueError(f"Unsupported gate: {gate}")
 
-            # Extract parameters
+            expected_qubits, expected_params = GATE_INFO[gate]
+
+            # ---------------------------------
+            # EXTRACT PARAMETERS
+            # ---------------------------------
+
             parameters = []
 
-            if params:
+            if params is not None:
+
                 parameters = [
                     p.strip()
                     for p in params.split(",")
                 ]
 
-            # Extract operands
+                if any(p == "" for p in parameters):
+                    raise ValueError(
+                        f"Invalid empty parameter in gate: {gate}"
+                    )
+
+            # Validate parameter count
+            if len(parameters) != expected_params:
+                raise ValueError(
+                    f"Gate {gate} expects {expected_params} parameters, "
+                    f"but got {len(parameters)}"
+                )
+
+            # ---------------------------------
+            # EXTRACT OPERANDS
+            # ---------------------------------
+
             operand_refs = [
                 operand.strip()
                 for operand in operands.split(",")
             ]
+
+            if any(not operand for operand in operand_refs):
+                raise ValueError("Empty gate operand")
 
             qubits = []
 
@@ -433,13 +480,18 @@ def parse_qasm(source):
                     )
                 )
 
-            # Controlled gate: CX / CNOT
-            if gate in ("cx", "cnot"):
+            # Validate qubit count
+            if len(qubits) != expected_qubits:
+                raise ValueError(
+                    f"Gate {gate} expects {expected_qubits} qubits, "
+                    f"but got {len(qubits)}"
+                )
 
-                if len(qubits) != 2:
-                    raise ValueError(
-                        "CX requires exactly two qubits"
-                    )
+            # ---------------------------------
+            # CONTROLLED GATE: CX / CNOT
+            # ---------------------------------
+
+            if gate in ("cx", "cnot"):
 
                 controls = [qubits[0]]
                 targets = [qubits[1]]
@@ -450,6 +502,10 @@ def parse_qasm(source):
 
                 controls = []
                 targets = qubits
+
+            # ---------------------------------
+            # ADD OPERATION TO IR
+            # ---------------------------------
 
             add_operation(
                 ir,
